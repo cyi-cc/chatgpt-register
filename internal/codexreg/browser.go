@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -210,6 +211,9 @@ func registerBrowser(ctx context.Context, in Input) (token string, err error) {
 			Element("input[name='name']").MustHandle(func(_ *rod.Element) {
 			state = "profile"
 		}).
+			ElementR("button", "Finish creating account|完成创建账户|完成创建账号").MustHandle(func(_ *rod.Element) {
+			state = "profile"
+		}).
 			MustDo()
 		switch state {
 		case "ready":
@@ -222,12 +226,7 @@ func registerBrowser(ctx context.Context, in Input) (token string, err error) {
 			time.Sleep(3 * time.Second)
 		case "profile":
 			in.logf("📝 账户完善页面已出现")
-			name := pg.MustElement("input[name='name']")
-			name.MustSelectAllText().MustInput(in.FullName)
-			age := pg.MustElement("input[name='age']")
-			age.MustSelectAllText().MustInput(in.Age)
-			pg.MustElement("button[type='submit']").MustEval(`() => this.click()`)
-			in.logf("👤 已提交资料 (name/age)")
+			fillProfile(pg, in)
 			time.Sleep(2 * time.Second)
 		}
 	}
@@ -252,4 +251,97 @@ func registerBrowser(ctx context.Context, in Input) (token string, err error) {
 	}
 	in.logf("🔑 accessToken 获取成功")
 	return accessToken, nil
+}
+
+// fillProfile 填写"账户完善/确认年龄"页并提交，兼容两种版本：
+//   - 旧版：Full name(input[name=name]) + Age(input[name=age])
+//   - 新版：Full name + Birthday(MM/DD/YYYY 掩码或原生 date 输入) + "Finish creating account"
+//
+// 用标签文本/aria/placeholder + JS 定位输入框，不依赖固定 name，避免页面小改就失效。
+func fillProfile(pg *rod.Page, in Input) {
+	// 生成一个成年生日（沿用旧版 18~45 岁区间）；能解析出有效 Age 则据其推算年份。
+	age := 18 + ri(28)
+	if v, err := strconv.Atoi(strings.TrimSpace(in.Age)); err == nil && v >= 18 {
+		age = v
+	}
+	// 在 (今天-age年) 基础上再往前随机 0~365 天，保证 ≥18 岁且生日各异。
+	bday := time.Now().AddDate(-age, 0, 0).AddDate(0, 0, -ri(365))
+	iso := bday.Format("2006-01-02")    // 原生 date 输入用
+	mmddyyyy := bday.Format("01022006") // 掩码输入按数字逐位输入
+
+	const js = `(fullName) => {
+  const norm = s => (s||'').replace(/\s+/g,' ').trim().toLowerCase();
+  const setVal = (el, v) => {
+    const d = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+    d.set.call(el, v);
+    el.dispatchEvent(new Event('input', {bubbles:true}));
+    el.dispatchEvent(new Event('change', {bubbles:true}));
+  };
+  const byLabel = (sub) => {
+    sub = norm(sub);
+    for (const l of document.querySelectorAll('label')) {
+      if (norm(l.textContent).includes(sub)) {
+        let i = l.querySelector('input');
+        if (!i && l.htmlFor) i = document.getElementById(l.htmlFor);
+        if (!i) { const c = l.closest('div,fieldset,section'); if (c) i = c.querySelector('input'); }
+        if (i) return i;
+      }
+    }
+    for (const i of document.querySelectorAll('input')) {
+      const a = norm(i.getAttribute('aria-label')) + ' ' + norm(i.placeholder) + ' ' + norm(i.name);
+      if (a.includes(sub)) return i;
+    }
+    return null;
+  };
+  document.querySelectorAll('[data-devin-target]').forEach(e => e.removeAttribute('data-devin-target'));
+  const nameInput = byLabel('full name') || document.querySelector('input[name="name"]') || byLabel('name');
+  if (nameInput) setVal(nameInput, fullName);
+  const ageInput = document.querySelector('input[name="age"]');
+  const bInput = document.querySelector('input[name="birthday"],input[name="birthdate"],input[name="dob"],input[type="date"]') ||
+                 byLabel('birthday') || byLabel('date of birth') || byLabel('birth');
+  const res = {name: !!nameInput, kind: '', isDate: false};
+  if (ageInput && ageInput !== bInput) {
+    ageInput.setAttribute('data-devin-target', '1');
+    res.kind = 'age';
+  } else if (bInput) {
+    bInput.setAttribute('data-devin-target', '1');
+    res.kind = 'birthday';
+    res.isDate = (bInput.type || '').toLowerCase() === 'date';
+  }
+  return JSON.stringify(res);
+}`
+
+	raw := pg.MustEval(js, in.FullName).Str()
+	var info struct {
+		Name   bool   `json:"name"`
+		Kind   string `json:"kind"`
+		IsDate bool   `json:"isDate"`
+	}
+	_ = json.Unmarshal([]byte(raw), &info)
+	in.logf("📝 完善页字段: name=%v type=%q isDate=%v", info.Name, info.Kind, info.IsDate)
+
+	switch info.Kind {
+	case "age":
+		pg.MustElement("[data-devin-target]").MustSelectAllText().MustInput(in.Age)
+		in.logf("👤 已填资料 (name + age=%s)", in.Age)
+	case "birthday":
+		if info.IsDate {
+			// 原生 date 控件用 JS 直接写 yyyy-mm-dd 更稳，逐位键入易被浏览器分段解析打乱。
+			pg.MustEval(`(v) => {
+  const el = document.querySelector('[data-devin-target]');
+  const d = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
+  d.set.call(el, v);
+  el.dispatchEvent(new Event('input', {bubbles:true}));
+  el.dispatchEvent(new Event('change', {bubbles:true}));
+}`, iso)
+		} else {
+			// 掩码文本框：清空默认值后逐位键入数字，由掩码自动补斜杠。
+			el := pg.MustElement("[data-devin-target]")
+			el.MustSelectAllText().MustInput(mmddyyyy)
+		}
+		in.logf("🎂 已填资料 (name + birthday=%s)", iso)
+	default:
+		in.logf("⚠ 完善页未识别到 age/birthday 字段，直接尝试提交")
+	}
+	pg.MustElement("button[type='submit']").MustEval(`() => this.click()`)
 }
