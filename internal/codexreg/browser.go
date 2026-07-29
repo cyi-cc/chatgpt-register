@@ -129,7 +129,7 @@ func registerBrowser(ctx context.Context, in Input) (token string, err error) {
 	// 3. 打开 ChatGPT 注册页
 	in.logf("🌐 正在打开 ChatGPT 注册页...")
 	page.MustNavigate("https://chatgpt.com/auth/login")
-	page.MustWaitLoad() 
+	page.MustWaitLoad()
 	page.MustElement("#email").MustWaitVisible()
 	in.logf("✅ 注册页已加载")
 
@@ -191,65 +191,128 @@ func registerBrowser(ctx context.Context, in Input) (token string, err error) {
 	page.MustElement("button[type='submit']").MustEval(`() => this.click()`)
 	in.logf("🔑 已提交验证码")
 
-	// 6. 提交验证码后的页面状态机：账户完善页(name/age) / 主界面 / 账号停用 /
-	// "Oops, an error occurred"(Operation timed out) 报错页——点击 Try again 可继续。
+	// 6. 提交验证码后的页面状态机：账户完善页(name/age) / 引导页 / 主界面 / 账号停用 /
+	// "Oops, an error occurred"(Operation timed out) 报错页。
+	// 说明：
+	//   - 这里全部用非 panic 的 Race().Do()——某一轮没等到已知页面(超时)只是重试，
+	//     不再像 MustDo 那样把一次超时直接抛成"注册流程异常: context deadline exceeded"。
+	//   - 主界面用多个选择器判定：新版 ChatGPT 输入框是 contenteditable 的
+	//     div#prompt-textarea，老选择器 textarea[name='prompt-textarea'] 已不一定命中。
+	//   - 完善资料/点按钮都包在 rod.Try 里，遇到 React 重渲染导致的
+	//     "Cannot find context with specified id" 时整轮重试而非直接失败。
 	ready := false
-	for attempt := 0; attempt < 8 && !ready; attempt++ {
-		pg := page.CancelTimeout().Timeout(60 * time.Second)
+	for attempt := 0; attempt < 12 && !ready; attempt++ {
+		pg := page.CancelTimeout().Timeout(30 * time.Second)
 		state := ""
-		pg.Race().
-			Element("textarea[name='prompt-textarea']").MustHandle(func(_ *rod.Element) {
-			state = "ready"
-		}).
-			ElementR("body", "You do not have an account|deleted or deactivated").MustHandle(func(_ *rod.Element) {
-			state = "disabled"
-		}).
-			ElementR("button", "Try again|重试").MustHandle(func(_ *rod.Element) {
-			state = "retry"
-		}).
-			Element("input[name='name']").MustHandle(func(_ *rod.Element) {
-			state = "profile"
-		}).
-			MustDo()
+		_, rerr := pg.Race().
+			Element("#prompt-textarea").Handle(func(_ *rod.Element) error { state = "ready"; return nil }).
+			Element("textarea[name='prompt-textarea']").Handle(func(_ *rod.Element) error { state = "ready"; return nil }).
+			ElementR("body", "You do not have an account|deleted or deactivated").Handle(func(_ *rod.Element) error { state = "disabled"; return nil }).
+			ElementR("body", "already exists|already have an account|user_already_exists").Handle(func(_ *rod.Element) error { state = "taken"; return nil }).
+			ElementR("button", "Try again|重试").Handle(func(_ *rod.Element) error { state = "retry"; return nil }).
+			Element("input[name='name']").Handle(func(_ *rod.Element) error { state = "profile"; return nil }).
+			ElementR("button", "Okay, let's go|Continue|Next|Get started|Done|Stay logged out").Handle(func(_ *rod.Element) error { state = "next"; return nil }).
+			Do()
+		if rerr != nil {
+			// 本轮没等到任何已知页面：稍后重试；多轮仍卡住时强制刷新主站，逼出主界面。
+			if attempt >= 4 {
+				_ = rod.Try(func() {
+					page.CancelTimeout().Timeout(30 * time.Second).MustNavigate("https://chatgpt.com/")
+				})
+			}
+			time.Sleep(2 * time.Second)
+			continue
+		}
 		switch state {
 		case "ready":
 			ready = true
 		case "disabled":
 			return "", ErrAccountTaken
+		case "taken":
+			// user_already_exists：该邮箱已注册过，点 Try again 没用，直接判为已占用不重试。
+			in.logf("⚠ 该邮箱已注册(user_already_exists)，判为已占用，不重试")
+			return "", ErrAccountTaken
 		case "retry":
+			// "Oops, an error occurred" 页有两类：可重试的 Operation timed out，
+			// 和 user_already_exists（该邮箱已注册）。后者也带 Try again 按钮，
+			// 所以点之前先看正文，命中"已存在"就直接判为已占用不重试。
+			taken := false
+			_ = rod.Try(func() {
+				t := strings.ToLower(pg.MustElement("body").MustText())
+				if strings.Contains(t, "already exists") ||
+					strings.Contains(t, "already have an account") ||
+					strings.Contains(t, "user_already_exists") {
+					taken = true
+				}
+			})
+			if taken {
+				in.logf("⚠ 该邮箱已注册(user_already_exists)，判为已占用，不重试")
+				return "", ErrAccountTaken
+			}
 			in.logf("⚠ 页面报错(Operation timed out)，点击 Try again 继续")
-			pg.MustElementR("button", "Try again|重试").MustEval(`() => this.click()`)
+			_ = rod.Try(func() { pg.MustElementR("button", "Try again|重试").MustEval(`() => this.click()`) })
 			time.Sleep(3 * time.Second)
+		case "next":
+			in.logf("➡ 出现引导按钮，点击继续")
+			_ = rod.Try(func() {
+				pg.MustElementR("button", "Okay, let's go|Continue|Next|Get started|Done|Stay logged out").MustEval(`() => this.click()`)
+			})
+			time.Sleep(2 * time.Second)
 		case "profile":
 			in.logf("📝 账户完善页面已出现")
-			name := pg.MustElement("input[name='name']")
-			name.MustSelectAllText().MustInput(in.FullName)
-			age := pg.MustElement("input[name='age']")
-			age.MustSelectAllText().MustInput(in.Age)
-			pg.MustElement("button[type='submit']").MustEval(`() => this.click()`)
+			// 资料页可能在 React 重渲染时丢失执行上下文；出错就整轮重试而非直接失败。
+			ferr := rod.Try(func() {
+				p2 := page.CancelTimeout().Timeout(30 * time.Second)
+				name := p2.MustElement("input[name='name']")
+				name.MustSelectAllText().MustInput(in.FullName)
+				age := p2.MustElement("input[name='age']")
+				age.MustSelectAllText().MustInput(in.Age)
+				p2.MustElement("button[type='submit']").MustEval(`() => this.click()`)
+			})
+			if ferr != nil {
+				in.logf("⚠ 完善资料时页面刷新，重试本轮")
+				time.Sleep(2 * time.Second)
+				continue
+			}
 			in.logf("👤 已提交资料 (name/age)")
-			time.Sleep(2 * time.Second)
+			time.Sleep(3 * time.Second)
+			// 提交资料后账号通常已建好：直接读 session 取 token，取到即成功返回，
+			// 避免把跳转过渡态又误判成"完善页"反复重填、最终丢上下文报错。
+			if tok := readAccessToken(page); tok != "" {
+				in.logf("🔑 accessToken 获取成功")
+				return tok, nil
+			}
 		}
+	}
+
+	// 7. 读取 accessToken。即使上面没等到主界面输入框，只要账号已建好，
+	// /api/auth/session 通常就能拿到 token，所以直接以能否取到 token 作为最终判定。
+	page = page.CancelTimeout().Timeout(60 * time.Second)
+	if tok := readAccessToken(page); tok != "" {
+		in.logf("🔑 accessToken 获取成功")
+		return tok, nil
 	}
 	if !ready {
 		return "", fmt.Errorf("等待 ChatGPT 主界面超时")
 	}
-	in.logf("✅ ChatGPT 主界面已就绪，提取 accessToken...")
+	return "", fmt.Errorf("未找到 accessToken，可能未登录成功")
+}
 
-	// 7. 导航到 /api/auth/session 读取 accessToken（重置超时，避免沿用已耗尽的预算）
-	page = page.CancelTimeout().Timeout(60 * time.Second)
-	page.MustNavigate("https://chatgpt.com/api/auth/session")
-	page.MustWaitLoad()
-	body := page.MustElement("body").MustText()
-
+// readAccessToken 打开 /api/auth/session 读取 accessToken；任何异常都吞掉返回空串。
+func readAccessToken(page *rod.Page) string {
+	pg := page.CancelTimeout().Timeout(30 * time.Second)
+	body := ""
+	if err := rod.Try(func() {
+		pg.MustNavigate("https://chatgpt.com/api/auth/session")
+		pg.MustWaitLoad()
+		body = pg.MustElement("body").MustText()
+	}); err != nil {
+		return ""
+	}
 	var sessionData map[string]any
-	if err := json.Unmarshal([]byte(body), &sessionData); err != nil {
-		return "", fmt.Errorf("解析 session JSON 失败: %w", err)
+	if json.Unmarshal([]byte(body), &sessionData) != nil {
+		return ""
 	}
-	accessToken, ok := sessionData["accessToken"].(string)
-	if !ok || accessToken == "" {
-		return "", fmt.Errorf("未找到 accessToken，可能未登录成功")
-	}
-	in.logf("🔑 accessToken 获取成功")
-	return accessToken, nil
+	token, _ := sessionData["accessToken"].(string)
+	return token
 }
