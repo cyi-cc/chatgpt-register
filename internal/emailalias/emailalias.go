@@ -12,14 +12,14 @@ func Base(address string) string {
 		return address
 	}
 	local := address[:at]
-	dash := strings.LastIndex(local, "-")
-	if dash < 1 {
+	plus := strings.LastIndex(local, "+")
+	if plus < 1 {
 		return address
 	}
-	if _, err := strconv.Atoi(local[dash+1:]); err != nil {
+	if _, err := strconv.Atoi(local[plus+1:]); err != nil {
 		return address
 	}
-	return local[:dash] + address[at:]
+	return local[:plus] + address[at:]
 }
 
 func Address(base string, suffix string) string {
@@ -32,7 +32,7 @@ func Address(base string, suffix string) string {
 	if suffix == "" {
 		return base
 	}
-	return base[:at] + "-" + suffix + base[at:]
+	return base[:at] + "+" + suffix + base[at:]
 }
 
 func LikePattern(base string) string {
@@ -41,7 +41,7 @@ func LikePattern(base string) string {
 	if at <= 0 {
 		return ""
 	}
-	return escapeLike(base[:at]) + "-%" + escapeLike(base[at:])
+	return escapeLike(base[:at]) + "+%" + escapeLike(base[at:])
 }
 
 func escapeLike(s string) string {

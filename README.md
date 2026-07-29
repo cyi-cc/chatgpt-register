@@ -41,9 +41,9 @@
     ↓
 完成注册 → 获取 accessToken
     ↓
-生成 Ed25519 密钥对，调用 auth.openai.com 注册 Codex Agent Identity
+从 accessToken 解出账号信息（account_id / user_id / plan_type）
     ↓
-导出完整 auth.json（含 agent_runtime_id / private_key / account_id 等）
+导出完整 auth.json（含 access_token / account_id 等）
     ↓
 写入数据库，账号状态更新为「已注册」
 ```

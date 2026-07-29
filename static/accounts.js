@@ -190,14 +190,14 @@ function syncBatchBar() {
   all.checked = ids.length > 0 && ids.every(id => accSelected.has(id));
 }
 
-/* ===== 下载（agent_identity JSON，单个→对象，多个→数组；下载即出库） ===== */
+/* ===== 下载（access_token 纯文本，一行一个；下载即出库） ===== */
 async function downloadAcc(id) {
-  await downloadByIds([id], 'auth_' + id + '.json');
+  await downloadByIds([id], 'access_token_' + id + '.txt');
 }
 async function downloadSelected() {
   const ids = [...accSelected];
   if (!ids.length) return;
-  await downloadByIds(ids, 'auth_' + ids.length + '.json');
+  await downloadByIds(ids, 'access_tokens_' + ids.length + '.txt');
 }
 async function downloadByIds(ids, filename) {
   const r = await api('/api/download', {

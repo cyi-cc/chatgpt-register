@@ -80,11 +80,16 @@ func (h *Handler) fissionCount() int {
 
 func (h *Handler) mailboxRegisterCount(m models.Mailbox) int {
 	var n int64
-	q := h.DB.Model(&models.Registration{}).Where("mailbox_id = ? OR email = ?", m.ID, m.Email)
+	// 归属该邮箱的记录：本身地址、mailbox_id 或别名（母号 + 裂变子号）
+	match := h.DB.Where("mailbox_id = ? OR email = ?", m.ID, m.Email)
 	if pattern := emailalias.LikePattern(m.Email); pattern != "" {
-		q = q.Or("email LIKE ? ESCAPE '\\'", pattern)
+		match = match.Or("email LIKE ? ESCAPE '\\'", pattern)
 	}
-	q.Count(&n)
+	// 只统计已占用名额的记录（成功注册 / 停用），pending / 失败可重试不计入
+	h.DB.Model(&models.Registration{}).
+		Where(match).
+		Where("status IN ?", []string{"registered", "already_registered"}).
+		Count(&n)
 	return int(n)
 }
 
