@@ -39,6 +39,7 @@
 
     <div class="batch-bar" id="acc-batch" style="display:none">
       <span id="acc-batch-count">已选 0 项</span>
+      <button class="px-btn" onclick="checkAliveSelected()">批量测活</button>
       <button class="px-btn" onclick="downloadSelected()">批量下载</button>
       <button class="px-btn danger" onclick="delSelected()">删除所选</button>
       <button class="px-btn ghost" onclick="clearSelection()">取消</button>
@@ -100,6 +101,6 @@
 
 <div id="toast" class="toast" style="display:none"></div>
 <script src="/static/layout.js?v=2"></script>
-<script src="/static/accounts.js?v=11"></script>
+<script src="/static/accounts.js?v=12"></script>
 </body>
 </html>

@@ -31,6 +31,12 @@ func (h *Handler) Produce(c *gin.Context) {
 		c.JSON(http.StatusConflict, gin.H{"error": "缺少浏览器，无法生产：浏览器正在下载或下载失败"})
 		return
 	}
+	if h.setting("email_source") == "varymail" {
+		if h.setting("varymail_api_key") == "" || h.setting("varymail_service_id") == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "已选 varymail 来源，但未配置 API Key 或服务，请先到设置里填写"})
+			return
+		}
+	}
 	if err := h.Producer.Start(in.Count); err != nil {
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return

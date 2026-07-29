@@ -47,6 +47,53 @@
       <div class="px-panel settings-card">
         <div class="settings-head">
           <span class="settings-icon violet">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-10 6L2 7"/></svg>
+          </span>
+          <div>
+            <h2>邮箱来源</h2>
+            <p>选择注册用邮箱：本地 Outlook 或 varymail 取件</p>
+          </div>
+        </div>
+        <div class="field">
+          <label>来源</label>
+          <span class="field-hint">Outlook = 本地已验证邮箱 + 别名裂变；varymail = 按次购买取件（无裂变）</span>
+          <select id="set-email-source" class="px-input" onchange="onSourceChange()">
+            <option value="outlook">本地 Outlook 邮箱</option>
+            <option value="varymail">varymail 取件</option>
+          </select>
+        </div>
+        <div id="varymail-fields">
+          <div class="field">
+            <label>varymail API Key</label>
+            <span class="field-hint">在 vary.email 后台获取，仅保存在本系统</span>
+            <input id="set-varymail-key" class="px-input" type="text" autocomplete="off" spellcheck="false" placeholder="API Key">
+          </div>
+          <div class="field">
+            <label>API 地址</label>
+            <span class="field-hint">留空用默认 https://api.varymail.io</span>
+            <input id="set-varymail-base" class="px-input" type="text" autocomplete="off" spellcheck="false" placeholder="https://api.varymail.io">
+          </div>
+          <div class="field">
+            <div class="field-label-row">
+              <label>服务</label>
+              <span id="varymail-price" class="count-badge"></span>
+            </div>
+            <span class="field-hint">先查询服务，再选用于接收 ChatGPT 验证码的服务；生产前会自动判断库存</span>
+            <select id="set-varymail-service" class="px-input"><option value="">— 请先查询服务 —</option></select>
+          </div>
+          <div id="varymail-result" class="proxy-result" style="display:none"></div>
+          <div class="settings-foot">
+            <button id="varymail-check-btn" class="px-btn ghost" onclick="checkVarymail()">查询服务 / 库存</button>
+          </div>
+        </div>
+        <div class="settings-foot">
+          <button class="px-btn primary" onclick="saveVarymail()">保存来源设置</button>
+        </div>
+      </div>
+
+      <div class="px-panel settings-card">
+        <div class="settings-head">
+          <span class="settings-icon violet">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="10" rx="2"/><path d="M6 12h.01M10 12h.01M14 12h4"/></svg>
           </span>
           <div>
@@ -116,6 +163,90 @@ async function loadSettings() {
   document.getElementById('set-proxy-enabled').checked = d.proxy_enabled === '1';
   document.getElementById('set-proxy-list').value = d.proxy_list || '';
   updateProxyCount();
+
+  document.getElementById('set-email-source').value = d.email_source === 'varymail' ? 'varymail' : 'outlook';
+  document.getElementById('set-varymail-key').value = d.varymail_api_key || '';
+  document.getElementById('set-varymail-base').value = d.varymail_base_url || '';
+  savedServiceId = d.varymail_service_id || '';
+  onSourceChange();
+  // 已配置 Key 则自动拉一次服务，回填已选服务与库存
+  if (savedServiceId && (d.varymail_api_key || '')) checkVarymail(true);
+}
+
+let savedServiceId = '';
+
+function onSourceChange() {
+  const v = document.getElementById('set-email-source').value;
+  document.getElementById('varymail-fields').style.display = v === 'varymail' ? '' : 'none';
+}
+
+async function checkVarymail(silent) {
+  const key = document.getElementById('set-varymail-key').value.trim();
+  const base = document.getElementById('set-varymail-base').value.trim();
+  const box = document.getElementById('varymail-result');
+  const btn = document.getElementById('varymail-check-btn');
+  if (!key) { if (!silent) toast('请先填写 API Key', true); return; }
+  btn.disabled = true;
+  const old = btn.textContent;
+  btn.textContent = '查询中…';
+  try {
+    const qs = new URLSearchParams({ key });
+    if (base) qs.set('base', base);
+    const r = await api('/api/varymail/services?' + qs.toString());
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      box.style.display = 'flex';
+      box.className = 'proxy-result fail';
+      box.textContent = '✗ ' + (d.error || '查询失败');
+      return;
+    }
+    const sel = document.getElementById('set-varymail-service');
+    const items = d.items || [];
+    sel.innerHTML = '<option value="">— 请选择服务 —</option>';
+    for (const it of items) {
+      const opt = document.createElement('option');
+      opt.value = String(it.id);
+      const stockTxt = it.stock === 'out' ? '无库存' : (it.stock || '');
+      opt.textContent = `${it.name} · 可用 ${it.available} · ${stockTxt}`;
+      if (it.stock === 'out' || it.available <= 0) opt.textContent += '（不可用）';
+      sel.appendChild(opt);
+    }
+    if (savedServiceId) sel.value = savedServiceId;
+    document.getElementById('varymail-price').textContent = '单价 ' + (d.price != null ? d.price : '?');
+    box.style.display = 'flex';
+    box.className = 'proxy-result ok';
+    box.textContent = '✓ 已获取 ' + items.length + ' 个服务';
+  } catch (e) {
+    box.style.display = 'flex';
+    box.className = 'proxy-result fail';
+    box.textContent = '✗ 查询失败：' + e;
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+}
+
+async function saveVarymail() {
+  const source = document.getElementById('set-email-source').value;
+  const serviceId = document.getElementById('set-varymail-service').value.trim();
+  if (source === 'varymail') {
+    if (!document.getElementById('set-varymail-key').value.trim()) return toast('请填写 varymail API Key', true);
+    if (!serviceId) return toast('请查询并选择一个服务', true);
+  }
+  const body = {
+    email_source: source,
+    varymail_api_key: document.getElementById('set-varymail-key').value.trim(),
+    varymail_base_url: document.getElementById('set-varymail-base').value.trim(),
+    varymail_service_id: serviceId,
+  };
+  const r = await api('/api/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) return toast('保存失败', true);
+  savedServiceId = serviceId;
+  toast('来源设置已保存');
 }
 
 function proxyLines() {

@@ -10,7 +10,6 @@ import (
 
 	"github.com/go-rod/rod"
 	"github.com/go-rod/rod/lib/launcher"
-	"github.com/go-rod/rod/lib/proto"
 	"github.com/go-rod/stealth"
 )
 
@@ -22,16 +21,26 @@ var ErrAccountTaken = errors.New("账号不存在或已被删除/停用")
 func registerBrowser(ctx context.Context, in Input) (token string, err error) {
 	in.logf("🚀 启动浏览器自动化注册流程...")
 
+	// 0. 按账号确定性派生一套指纹画像（同账号稳定、异账号各异，避免批量指纹雷同）
+	fp := newFingerprint(in.Email)
+
 	// 1. 启动 Chrome，禁用自动化特征
 	l := launcher.New().
-		Headless(in.Headless).
 		NoSandbox(true).
 		Set("disable-dev-shm-usage").
 		Append("--disable-blink-features", "AutomationControlled").
 		Append("--disable-infobars", "").
 		Append("--no-first-run", "").
 		Append("--no-default-browser-check", "").
-		Append("--window-size", "1280,800")
+		// 防 WebRTC 泄露真实 IP：只允许经代理的 UDP，STUN 不再暴露本机地址
+		Set("force-webrtc-ip-handling-policy", "disable_non_proxied_udp").
+		Append("--window-size", fp.windowSizeArg())
+	// 无头时用 new headless（更接近有头，痕迹更少）
+	if in.Headless {
+		l = l.Set("headless", "new")
+	} else {
+		l = l.Headless(false)
+	}
 
 	// 1.1 挂代理（账号密码交给 HandleAuth）
 	var proxyUser, proxyPass string
@@ -103,13 +112,12 @@ func registerBrowser(ctx context.Context, in Input) (token string, err error) {
 		_, acceptLang = localeForCountry(geo.CountryCode)
 	}
 
-	// 2.1 stealth 隐身插件 + 真实 User-Agent（创建即注入与地理位置一致的指纹）
+	// 2.1 stealth 隐身插件 + 按真实内核对齐的 UA/Client Hints（创建即注入与地理位置一致的指纹）
 	page = stealth.MustPage(browser)
-	page.MustSetUserAgent(&proto.NetworkSetUserAgentOverride{
-		UserAgent:      userAgent,
-		AcceptLanguage: acceptLang,
-		Platform:       "Win32",
-	})
+	_, full := fp.applyUserAgent(page, browser, acceptLang)
+	in.logf("🧬 内核=%s 指纹: %dx%d cores=%d mem=%dG gpu=%s", full, fp.screenW, fp.screenH, fp.cores, fp.memory, fp.gpu.renderer)
+	// 2.2 导航前注入指纹补丁（屏幕/硬件/WebGL/Canvas/Audio），补齐 stealth 覆盖不到的项
+	fp.inject(page)
 
 	// 2.3 对齐时区/坐标/locale（UA/语言已在上面按地理信息注入）
 	if geo != nil {

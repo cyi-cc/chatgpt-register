@@ -65,6 +65,9 @@ func main() {
 		api.PUT("/registrations/:id/shipped", h.SetShipped)
 		api.POST("/download", h.Download)
 
+		api.POST("/registrations/:id/check-alive", h.CheckAlive)
+		api.POST("/check-alive", h.CheckAlive)
+
 		api.POST("/produce", h.Produce)
 		api.GET("/produce/status", h.ProduceStatus)
 		api.POST("/produce/stop", h.ProduceStop)
@@ -81,6 +84,8 @@ func main() {
 
 		api.GET("/settings", h.SettingsGet)
 		api.PUT("/settings", h.SettingsSave)
+
+		api.GET("/varymail/services", h.VarymailServices)
 
 		api.POST("/proxy/test", h.ProxyTest)
 	}

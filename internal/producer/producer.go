@@ -30,7 +30,7 @@ import (
 )
 
 const (
-	defaultMaxConcurrency = 3
+	defaultMaxConcurrency = 10
 	defaultFissionCount   = 5
 	codePollTimeout       = 3 * time.Minute
 	codePollInterval      = 5 * time.Second
@@ -40,12 +40,23 @@ const (
 // openAI 验证码：6 位数字。
 var codeRe = regexp.MustCompile(`\b(\d{6})\b`)
 
+// 邮箱来源。
+const (
+	SourceOutlook  = "outlook"  // 本地已验证 Outlook 邮箱 + 别名裂变（默认）
+	SourceVarymail = "varymail" // vary.email 取件：按次购买邮箱，无裂变
+)
+
 // Config 从系统设置装载的运行参数。
 type Config struct {
 	MaxConcurrency int
 	FissionCount   int
 	Headless       bool
 	Proxies        []string // 代理池，按账户轮转；空=直连
+
+	EmailSource       string // outlook / varymail
+	VarymailBaseURL   string
+	VarymailKey       string
+	VarymailServiceID int
 }
 
 // Progress 生产进度快照，供 /api/produce/status 展示。
@@ -131,6 +142,10 @@ func (p *Producer) run(ctx context.Context, target int) {
 	}()
 
 	cfg := p.loadConfig()
+	if cfg.EmailSource == SourceVarymail {
+		p.runVarymail(ctx, target, cfg)
+		return
+	}
 	p.logf("开始生产，目标 %d 个账号（每邮箱母号+%d 裂变，并发 %d）", target, cfg.FissionCount, cfg.MaxConcurrency)
 
 	sem := make(chan struct{}, cfg.MaxConcurrency)
@@ -487,6 +502,14 @@ func (p *Producer) loadConfig() Config {
 	if p.getSetting("proxy_enabled") == "1" {
 		cfg.Proxies = proxyList(p.getSetting("proxy_list"))
 	}
+
+	cfg.EmailSource = p.getSetting("email_source")
+	if cfg.EmailSource != SourceVarymail {
+		cfg.EmailSource = SourceOutlook
+	}
+	cfg.VarymailBaseURL = p.getSetting("varymail_base_url")
+	cfg.VarymailKey = p.getSetting("varymail_api_key")
+	cfg.VarymailServiceID = atoiDefault(p.getSetting("varymail_service_id"), 0)
 	return cfg
 }
 

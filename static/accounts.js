@@ -32,6 +32,7 @@ async function load() {
 
 function rowHtml(x) {
   const canDownload = x.status === 'registered';
+  const canCheck = x.status === 'registered' || x.status === 'already_registered';
   return `
     <tr class="${accSelected.has(x.id) ? 'row-sel' : ''}">
       <td class="col-check"><input type="checkbox" ${accSelected.has(x.id) ? 'checked' : ''} onclick="toggleSelect(${x.id}, this.checked)"></td>
@@ -44,6 +45,9 @@ function rowHtml(x) {
       <td>
         <button class="icon-btn" title="日志" onclick="showLog(${x.id})">
           <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/></svg>
+        </button>
+        <button class="icon-btn" title="测活" ${canCheck ? '' : 'disabled'} onclick="checkAlive(${x.id})">
+          <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
         </button>
         <button class="icon-btn" title="下载" ${canDownload ? '' : 'disabled'} onclick="downloadAcc(${x.id})">
           <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></svg>
@@ -216,6 +220,33 @@ async function downloadByIds(ids, filename) {
   a.click();
   URL.revokeObjectURL(a.href);
   load(); // 刷新出库状态
+}
+
+/* ===== 测活（用 access_token 请求 usage_limits，失败自动停用） ===== */
+async function checkAlive(id) {
+  await checkAliveByIds([id]);
+}
+async function checkAliveSelected() {
+  const ids = [...accSelected];
+  if (!ids.length) return;
+  await checkAliveByIds(ids);
+}
+async function checkAliveByIds(ids) {
+  toast('测活中...(' + ids.length + ' 个)');
+  const r = await api('/api/check-alive', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids }),
+  });
+  if (!r.ok) {
+    const d = await r.json().catch(() => ({}));
+    return toast(d.error || '测活失败', true);
+  }
+  const d = await r.json();
+  let m = '测活完成：存活 ' + (d.alive || 0) + '，停用 ' + (d.dead || 0);
+  if (d.error) m += '，异常 ' + d.error;
+  toast(m);
+  load();
 }
 
 /* ===== 删除 ===== */
