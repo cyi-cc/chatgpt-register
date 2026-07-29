@@ -18,15 +18,15 @@ import (
 // runVarymail 用 vary.email 取件作为邮箱来源生产账号：
 // 逐个购买邮箱（无母号/裂变概念），并发注册；库存用尽或余额不足即停止。
 func (p *Producer) runVarymail(ctx context.Context, target int, cfg Config) {
-	if strings.TrimSpace(cfg.VarymailKey) == "" || cfg.VarymailServiceID <= 0 {
-		p.setMessage("未配置 varymail API Key 或服务，无法生产")
-		p.logf("✗ varymail 未配置：请在设置里填写 API Key 与服务 ID")
+	if strings.TrimSpace(cfg.VarymailKey) == "" {
+		p.setMessage("未配置 varymail API Key，无法生产")
+		p.logf("✗ varymail 未配置：请在设置里填写 API Key")
 		return
 	}
-	cli := varymail.New(cfg.VarymailBaseURL, cfg.VarymailKey)
+	cli := varymail.New("", cfg.VarymailKey)
 
-	// 起始库存检查：给出友好提示，库存不足直接不跑。
-	svc, err := p.varymailService(ctx, cli, cfg.VarymailServiceID)
+	// 固定使用 chatgpt 服务，起始库存检查：给出友好提示，库存不足直接不跑。
+	svc, _, err := cli.ServiceByName(ctx, varymail.DefaultServiceName)
 	if err != nil {
 		p.setMessage("varymail 连接失败：" + err.Error())
 		p.logf("✗ varymail 查询服务失败：%v", err)
@@ -60,7 +60,7 @@ func (p *Producer) runVarymail(ctx context.Context, target int, cfg Config) {
 		}
 
 		// 购买一个邮箱（下单即扣费）。
-		pur, bal, err := cli.Buy(ctx, cfg.VarymailServiceID)
+		pur, bal, err := cli.Buy(ctx, svc.ID)
 		if err != nil {
 			switch {
 			case errors.Is(err, varymail.ErrOutOfStock):
@@ -224,16 +224,3 @@ func (p *Producer) fetchCodeVarymail(ctx context.Context, cli *varymail.Client, 
 	return "", fmt.Errorf("超时未收到验证码")
 }
 
-// varymailService 查询指定服务的实时库存信息。
-func (p *Producer) varymailService(ctx context.Context, cli *varymail.Client, serviceID int) (varymail.Service, error) {
-	items, _, err := cli.Services(ctx)
-	if err != nil {
-		return varymail.Service{}, err
-	}
-	for _, s := range items {
-		if s.ID == serviceID {
-			return s, nil
-		}
-	}
-	return varymail.Service{}, fmt.Errorf("服务 ID %d 不在售卖列表中", serviceID)
-}

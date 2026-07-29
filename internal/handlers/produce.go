@@ -32,8 +32,8 @@ func (h *Handler) Produce(c *gin.Context) {
 		return
 	}
 	if h.setting("email_source") == "varymail" {
-		if h.setting("varymail_api_key") == "" || h.setting("varymail_service_id") == "" {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "已选 varymail 来源，但未配置 API Key 或服务，请先到设置里填写"})
+		if h.setting("varymail_api_key") == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "已选 varymail 来源，但未配置 API Key，请先到设置里填写"})
 			return
 		}
 	}

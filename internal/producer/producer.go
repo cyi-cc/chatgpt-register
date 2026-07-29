@@ -53,10 +53,8 @@ type Config struct {
 	Headless       bool
 	Proxies        []string // 代理池，按账户轮转；空=直连
 
-	EmailSource       string // outlook / varymail
-	VarymailBaseURL   string
-	VarymailKey       string
-	VarymailServiceID int
+	EmailSource string // outlook / varymail
+	VarymailKey string
 }
 
 // Progress 生产进度快照，供 /api/produce/status 展示。
@@ -507,9 +505,7 @@ func (p *Producer) loadConfig() Config {
 	if cfg.EmailSource != SourceVarymail {
 		cfg.EmailSource = SourceOutlook
 	}
-	cfg.VarymailBaseURL = p.getSetting("varymail_base_url")
 	cfg.VarymailKey = p.getSetting("varymail_api_key")
-	cfg.VarymailServiceID = atoiDefault(p.getSetting("varymail_service_id"), 0)
 	return cfg
 }
 

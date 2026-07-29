@@ -1,4 +1,4 @@
-// Package varymail 封装 vary.email（api.varymail.io）取件 API：
+// Package varymail 封装 vary.email 取件 API：
 // 查询在售服务/库存、购买取件权（分配邮箱）、按取件权拉取最新验证码。
 // 作为 Outlook 本地邮箱之外的另一种"邮箱来源"，供 producer 批量注册使用。
 package varymail
@@ -16,7 +16,10 @@ import (
 )
 
 // DefaultBaseURL vary.email 开放 API 根地址。
-const DefaultBaseURL = "https://api.varymail.io"
+const DefaultBaseURL = "https://vary.email"
+
+// DefaultServiceName 固定使用的服务名（接收 ChatGPT/OpenAI 验证码）。
+const DefaultServiceName = "chatgpt"
 
 // 已知业务错误，供上层区分处理。
 var (
@@ -24,6 +27,7 @@ var (
 	ErrNoBalance    = errors.New("varymail: 余额不足，请先充值")
 	ErrOutOfStock   = errors.New("varymail: 该服务暂时无可用邮箱")
 	ErrPickup       = errors.New("varymail: 取件失败，邮箱可能已失效")
+	ErrNoService    = errors.New("varymail: 店铺内未找到 chatgpt 服务")
 )
 
 // Client vary.email API 客户端。
@@ -157,6 +161,27 @@ func (c *Client) Services(ctx context.Context) (items []Service, price float64, 
 		return nil, 0, fmt.Errorf("varymail: 服务列表解析失败")
 	}
 	return out.Items, out.Price, nil
+}
+
+// ServiceByName 在售服务里按名字找一个（大小写不敏感，先精确后包含）。
+// 找不到返回 ErrNoService。price 为取件单价。
+func (c *Client) ServiceByName(ctx context.Context, name string) (svc Service, price float64, err error) {
+	items, price, err := c.Services(ctx)
+	if err != nil {
+		return Service{}, 0, err
+	}
+	name = strings.ToLower(strings.TrimSpace(name))
+	for _, s := range items {
+		if strings.ToLower(strings.TrimSpace(s.Name)) == name {
+			return s, price, nil
+		}
+	}
+	for _, s := range items {
+		if strings.Contains(strings.ToLower(s.Name), name) {
+			return s, price, nil
+		}
+	}
+	return Service{}, price, ErrNoService
 }
 
 // Buy 按服务 ID 下单，成功返回分配到的邮箱与扣费后余额。

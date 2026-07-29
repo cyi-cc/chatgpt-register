@@ -19,8 +19,8 @@ func (h *Handler) setting(key string) string {
 	return strings.TrimSpace(s.Value)
 }
 
-// VarymailServices 查询 vary.email 在售服务与库存，供设置页选服务/看库存。
-// 支持用 query 里的 key/base 临时覆盖（保存前先测试）。
+// VarymailServices 查询固定的 chatgpt 服务库存，供设置页验证 Key/看库存。
+// 支持用 query 里的 key 临时覆盖（保存前先测试）。
 func (h *Handler) VarymailServices(c *gin.Context) {
 	key := strings.TrimSpace(c.Query("key"))
 	if key == "" {
@@ -30,16 +30,12 @@ func (h *Handler) VarymailServices(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "请先填写 varymail API Key"})
 		return
 	}
-	base := strings.TrimSpace(c.Query("base"))
-	if base == "" {
-		base = h.setting("varymail_base_url")
-	}
 
-	cli := varymail.New(base, key)
-	items, price, err := cli.Services(c.Request.Context())
+	cli := varymail.New("", key)
+	svc, price, err := cli.ServiceByName(c.Request.Context(), varymail.DefaultServiceName)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"items": items, "price": price})
+	c.JSON(http.StatusOK, gin.H{"service": svc, "price": price})
 }
