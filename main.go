@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"io/fs"
 	"log"
@@ -13,6 +14,7 @@ import (
 	"chatgpt-register/internal/browserboot"
 	"chatgpt-register/internal/db"
 	"chatgpt-register/internal/handlers"
+	"chatgpt-register/internal/replenish"
 
 	"github.com/gin-gonic/gin"
 )
@@ -47,6 +49,10 @@ func main() {
 	r := gin.Default()
 
 	h := handlers.New(database, authSvc, browser)
+
+	// 自动补号：后台定时把已注册账号推送到 image2api 账号池（受系统设置开关控制）。
+	// 没号时可自动触发生产（复用同一个 Producer 与浏览器）。
+	replenish.New(database, h.Producer, browser).Start(context.Background())
 
 	r.POST("/api/login", h.Login)
 

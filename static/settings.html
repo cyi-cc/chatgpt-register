@@ -88,6 +88,53 @@
       <div class="px-panel settings-card">
         <div class="settings-head">
           <span class="settings-icon violet">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg>
+          </span>
+          <div>
+            <h2>自动补号</h2>
+            <p>定时把已注册账号推送到 image2api 账号池</p>
+          </div>
+        </div>
+        <label class="switch-row">
+          <input id="set-replenish-enabled" type="checkbox">
+          <span class="switch-ui"></span>
+          <span class="switch-label">开启自动补号</span>
+        </label>
+        <div class="field">
+          <label>存活少于多少补</label>
+          <span class="field-hint">每 30 秒检查一次目标站 openai 存活号数，低于该值就用未出库的已注册账号补足</span>
+          <div class="input-suffix">
+            <input id="set-replenish-threshold" class="px-input" type="number" min="1" max="10000" placeholder="如 20">
+            <span class="suffix">个</span>
+          </div>
+        </div>
+        <div class="field">
+          <label>目标补号网站</label>
+          <span class="field-hint">image2api 地址，如 https://your.domain 或 http://1.2.3.4:2000</span>
+          <input id="set-replenish-url" class="px-input" type="text" autocomplete="off" spellcheck="false" placeholder="https://your.domain">
+        </div>
+        <div class="field">
+          <label>账号</label>
+          <span class="field-hint">image2api 后台管理员账号（邮箱或用户名）</span>
+          <input id="set-replenish-user" class="px-input" type="text" autocomplete="off" spellcheck="false" placeholder="admin@example.com">
+        </div>
+        <div class="field">
+          <label>密码</label>
+          <input id="set-replenish-pass" class="px-input" type="password" autocomplete="new-password" placeholder="登录密码">
+        </div>
+        <label class="switch-row">
+          <input id="set-replenish-autoproduce" type="checkbox">
+          <span class="switch-ui"></span>
+          <span class="switch-label">没现成号时自动生产（并发用上面「最大并发数」，滚动生产、满 5 个推一次）</span>
+        </label>
+        <div class="settings-foot">
+          <button class="px-btn primary" onclick="saveReplenish()">保存补号配置</button>
+        </div>
+      </div>
+
+      <div class="px-panel settings-card">
+        <div class="settings-head">
+          <span class="settings-icon violet">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="10" rx="2"/><path d="M6 12h.01M10 12h.01M14 12h4"/></svg>
           </span>
           <div>
@@ -163,6 +210,39 @@ async function loadSettings() {
   onSourceChange();
   // 已配置 Key 则自动查一次 chatgpt 库存
   if (d.varymail_api_key) checkVarymail(true);
+
+  document.getElementById('set-replenish-enabled').checked = d.replenish_enabled === '1';
+  document.getElementById('set-replenish-threshold').value = d.replenish_threshold || '';
+  document.getElementById('set-replenish-url').value = d.replenish_target_url || '';
+  document.getElementById('set-replenish-user').value = d.replenish_username || '';
+  document.getElementById('set-replenish-pass').value = d.replenish_password || '';
+  document.getElementById('set-replenish-autoproduce').checked = d.replenish_autoproduce === '1';
+}
+
+async function saveReplenish() {
+  const enabled = document.getElementById('set-replenish-enabled').checked;
+  const threshold = document.getElementById('set-replenish-threshold').value.trim();
+  const url = document.getElementById('set-replenish-url').value.trim();
+  const user = document.getElementById('set-replenish-user').value.trim();
+  const pass = document.getElementById('set-replenish-pass').value;
+  if (enabled && (!threshold || !url || !user || !pass)) {
+    return toast('开启补号需填写阈值、目标网站、账号和密码', true);
+  }
+  const body = {
+    replenish_enabled: enabled ? '1' : '0',
+    replenish_threshold: threshold,
+    replenish_target_url: url,
+    replenish_username: user,
+    replenish_password: pass,
+    replenish_autoproduce: document.getElementById('set-replenish-autoproduce').checked ? '1' : '0',
+  };
+  const r = await api('/api/settings', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) return toast('保存失败', true);
+  toast('补号配置已保存');
 }
 
 function onSourceChange() {
