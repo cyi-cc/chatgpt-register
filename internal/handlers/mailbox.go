@@ -9,6 +9,7 @@ import (
 	"chatgpt-register/internal/emailalias"
 	"chatgpt-register/internal/mailfetch"
 	"chatgpt-register/internal/models"
+	"chatgpt-register/internal/varymail"
 
 	"github.com/gin-gonic/gin"
 )
@@ -168,6 +169,23 @@ func (h *Handler) MailboxVerify(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "邮箱不存在"})
 		return
 	}
+	if m.Provider == "varymail" {
+		// varymail 邮箱验证取件权是否仍有效
+		var err error
+		if key := h.setting("varymail_api_key"); key == "" || m.PurchaseID <= 0 {
+			err = varymail.ErrUnauthorized
+		} else {
+			_, _, err = varymail.New("", key).Code(c.Request.Context(), m.PurchaseID)
+		}
+		if err != nil {
+			m.Status = "verify_failed"
+		} else {
+			m.Status = "verified"
+		}
+		h.DB.Model(&m).Update("status", m.Status)
+		c.JSON(http.StatusOK, gin.H{"id": m.ID, "status": m.Status})
+		return
+	}
 	err := h.Mail.Verify(c.Request.Context(), mailfetch.Account{
 		Email:        m.Email,
 		ClientID:     m.ClientID,
@@ -228,6 +246,10 @@ func (h *Handler) MailboxMessages(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "邮箱不存在"})
 		return
 	}
+	if m.Provider == "varymail" {
+		h.varymailMessages(c, m)
+		return
+	}
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "20"))
 	msgs, err := h.Mail.ListMessages(c.Request.Context(), mailfetch.Account{
 		Email:        m.Email,
@@ -252,6 +274,10 @@ func (h *Handler) MailboxMessage(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "邮箱不存在"})
 		return
 	}
+	if m.Provider == "varymail" {
+		h.varymailMessage(c, m)
+		return
+	}
 	msg, err := h.Mail.GetMessage(c.Request.Context(), mailfetch.Account{
 		Email:        m.Email,
 		ClientID:     m.ClientID,
@@ -266,4 +292,41 @@ func (h *Handler) MailboxMessage(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, msg)
+}
+
+// varymailMessages 用取件权拉取 varymail 邮箱最新一封来信（vary.email 只提供最新一封）。
+func (h *Handler) varymailMessages(c *gin.Context, m models.Mailbox) {
+	key := h.setting("varymail_api_key")
+	if key == "" || m.PurchaseID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 varymail API Key 或取件权 ID", "email": m.Email})
+		return
+	}
+	msg, hasMail, err := varymail.New("", key).Code(c.Request.Context(), m.PurchaseID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error(), "email": m.Email})
+		return
+	}
+	items := []gin.H{}
+	if hasMail {
+		items = append(items, gin.H{
+			"id": msg.ID, "from": msg.From, "from_name": "",
+			"subject": "验证码：" + msg.Code, "received_at": msg.ReceivedAt,
+		})
+	}
+	c.JSON(http.StatusOK, gin.H{"email": m.Email, "items": items})
+}
+
+// varymailMessage varymail 只有验证码，正文直接返回验证码文本。
+func (h *Handler) varymailMessage(c *gin.Context, m models.Mailbox) {
+	key := h.setting("varymail_api_key")
+	if key == "" || m.PurchaseID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "缺少 varymail API Key 或取件权 ID", "email": m.Email})
+		return
+	}
+	msg, hasMail, err := varymail.New("", key).Code(c.Request.Context(), m.PurchaseID)
+	if err != nil || !hasMail {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "暂无邮件", "email": m.Email})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"id": msg.ID, "from": msg.From, "subject": "验证码：" + msg.Code, "text": "验证码：" + msg.Code, "received_at": msg.ReceivedAt})
 }

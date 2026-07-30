@@ -445,6 +445,7 @@ select.px-input option { background: #fff; }
 .badge.verifying       { color: var(--cyan);   background: rgba(8, 145, 178, .13); }
 .badge.verify_failed   { color: var(--red);    background: rgba(225, 29, 72, .12); }
 .badge.verified        { color: var(--green);  background: rgba(22, 163, 74, .13); }
+.badge.vary            { color: #7c3aed;       background: rgba(124, 58, 237, .12); }
 
 /* ===== 账户生产态徽章 ===== */
 .badge.pending         { color: var(--amber);  background: rgba(217, 119, 6, .13); }

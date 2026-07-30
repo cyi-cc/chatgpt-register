@@ -29,7 +29,7 @@ async function loadMailboxes() {
     document.getElementById('mb-rows').innerHTML = (d.data || []).map(x => `
       <tr class="${mbSelected.has(x.id) ? 'row-sel' : ''}">
         <td class="col-check"><input type="checkbox" ${mbSelected.has(x.id) ? 'checked' : ''} onclick="toggleSelect(${x.id}, this.checked)"></td>
-        <td>${esc(x.email)}</td>
+        <td>${esc(x.email)}${x.provider === 'varymail' ? ' <span class="badge vary">vary</span>' : ''}</td>
         <td>${Number(x.register_count || 0)} / ${Number(x.register_limit || 0)}</td>
         <td>${fmtTime(x.created_at)}</td>
         <td><span class="badge ${esc(x.status)}">${MB_STATUS[x.status] || esc(x.status)}</span></td>

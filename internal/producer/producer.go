@@ -234,7 +234,8 @@ func (p *Producer) nextJob(cfg Config) (models.Mailbox, string, bool, bool) {
 	defer p.claimMu.Unlock()
 
 	var mailboxes []models.Mailbox
-	if err := p.db.Where("status = ?", "verified").Order("id asc").Find(&mailboxes).Error; err != nil {
+	// varymail 购买的邮箱只归 varymail 流程复用，不参与 Outlook 母号/裂变
+	if err := p.db.Where("status = ? AND provider <> ?", "verified", SourceVarymail).Order("id asc").Find(&mailboxes).Error; err != nil {
 		return models.Mailbox{}, "", false, false
 	}
 

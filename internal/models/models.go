@@ -12,6 +12,7 @@ type Mailbox struct {
 	Provider      string    `gorm:"size:64" json:"provider"` // gmail / outlook / 临时邮箱...
 	ClientID      string    `gorm:"size:255" json:"client_id"`
 	RefreshToken  string    `gorm:"type:text" json:"refresh_token"`
+	PurchaseID    int       `gorm:"default:0" json:"purchase_id"` // vary.email 取件权 ID（provider=varymail 时有效）
 	Status        string    `gorm:"size:32;default:unverified" json:"status"`
 	Note          string    `gorm:"type:text" json:"note"`
 	RegisterCount int       `gorm:"-" json:"register_count"`
